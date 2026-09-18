@@ -1,7 +1,7 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   experimental: {
-    serverComponentsExternalPackages: ['@electric-sql/pglite', 'better-sqlite3', 'xlsx'],
+    serverComponentsExternalPackages: ['@electric-sql/pglite', 'xlsx'],
   },
   webpack: (config, { isServer }) => {
     if (!isServer) {
