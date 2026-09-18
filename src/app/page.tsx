@@ -1,0 +1,284 @@
+'use client';
+
+import React, { useState, useEffect, useMemo } from 'react';
+import { useRouter } from 'next/navigation';
+import { Goal, MonthlyLog, ViewMode, DepartmentFunction, GoalStatus, GoalType } from '@/lib/types';
+import { TopHeader } from '@/components/navigation/TopHeader';
+import { ExecutivePulse } from '@/components/navigation/ExecutivePulse';
+import { RoadmapView } from '@/components/views/RoadmapView';
+import { BoardView } from '@/components/views/BoardView';
+import { CadenceView } from '@/components/views/CadenceView';
+import { StrategicMapView } from '@/components/views/StrategicMapView';
+import { Toast } from '@/components/ui/Toast';
+import { Loader2 } from 'lucide-react';
+
+export default function SmartGoalsDashboard() {
+  const router = useRouter();
+  const [goals, setGoals] = useState<Goal[]>([]);
+  const [loading, setLoading] = useState(true);
+  // Default to board (Goals Overview) for immediate, non-technical readability
+  const [currentView, setCurrentView] = useState<ViewMode>('board');
+
+  // Filters
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFunction, setSelectedFunction] = useState<DepartmentFunction | 'All'>('All');
+  const [selectedStatus, setSelectedStatus] = useState<GoalStatus | 'All'>('All');
+  const [selectedType, setSelectedType] = useState<GoalType | 'All'>('All');
+
+  // Sync / Export states
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Notifications
+  const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'info' } | null>(null);
+
+  const fetchGoals = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch('/api/goals');
+      const data = await res.json();
+      if (data.success) {
+        setGoals(data.data);
+      } else {
+        setToast({ message: data.error || 'Failed to fetch goals', type: 'error' });
+      }
+    } catch (err: any) {
+      setToast({ message: err.message || 'Network error fetching goals', type: 'error' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchGoals();
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      const v = params.get('view');
+      if (v === 'strategic' || v === 'board' || v === 'roadmap' || v === 'cadence') {
+        setCurrentView(v as ViewMode);
+      }
+    }
+  }, []);
+
+  // Filtered goals
+  const filteredGoals = useMemo(() => {
+    return goals.filter((g) => {
+      // Function filter
+      if (selectedFunction !== 'All' && g.function !== selectedFunction) return false;
+
+      // Status filter
+      if (selectedStatus !== 'All' && g.status !== selectedStatus) return false;
+
+      // Type filter
+      if (selectedType !== 'All' && g.goal_type !== selectedType) return false;
+
+      // Search query
+      if (searchQuery.trim()) {
+        const query = searchQuery.toLowerCase();
+        const matchesTitle = g.title.toLowerCase().includes(query);
+        const matchesSpecific = g.specific_statement?.toLowerCase().includes(query) || false;
+        const matchesTarget = g.target?.toLowerCase().includes(query) || false;
+        const matchesPIC = g.pic?.toLowerCase().includes(query) || false;
+        const matchesCategory = g.function.toLowerCase().includes(query);
+        if (!matchesTitle && !matchesSpecific && !matchesTarget && !matchesPIC && !matchesCategory) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [goals, selectedFunction, selectedStatus, selectedType, searchQuery]);
+
+  // Counts for filter pills
+  const functionCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: goals.length };
+    for (const g of goals) {
+      counts[g.function] = (counts[g.function] || 0) + 1;
+    }
+    return counts;
+  }, [goals]);
+
+  const completedCount = useMemo(() => {
+    return goals.filter((g) => g.status === 'Completed').length;
+  }, [goals]);
+
+  // Initiative select -> navigate directly to dedicated full-page workspace
+  const handleSelectGoal = (goal: Goal) => {
+    router.push(`/goals/${goal.id}`);
+  };
+
+  // Update single monthly log entry
+  const handleUpdateMonthlyLog = async (
+    logId: number,
+    data: Partial<MonthlyLog>
+  ): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/monthly/${logId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (result.success) {
+        setGoals((prev) =>
+          prev.map((g) => {
+            if (!g.monthly_logs) return g;
+            return {
+              ...g,
+              monthly_logs: g.monthly_logs.map((l) =>
+                l.id === logId ? { ...l, ...result.data } : l
+              ),
+            };
+          })
+        );
+        setToast({ message: 'Monthly review note saved', type: 'success' });
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      console.error(err);
+      return false;
+    }
+  };
+
+  // Sync with source Excel file
+  const handleSyncExcel = async () => {
+    if (!confirm('Refresh data from the original spreadsheet? This will restore the latest sheet values.')) {
+      return;
+    }
+    try {
+      setIsSyncing(true);
+      const res = await fetch('/api/sync', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setToast({
+          message: `Successfully refreshed ${data.data.goalsCount} goals from the master spreadsheet!`,
+          type: 'success',
+        });
+        await fetchGoals();
+      } else {
+        setToast({ message: data.error || 'Sync failed', type: 'error' });
+      }
+    } catch (err: any) {
+      setToast({ message: err.message || 'Error syncing from spreadsheet', type: 'error' });
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  // Export current live database to .xlsx
+  const handleExportExcel = async () => {
+    try {
+      setIsExporting(true);
+      const res = await fetch('/api/export');
+      if (!res.ok) throw new Error('Export failed');
+
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `LeadGeeks-IT-SMART-Goals-2026-${new Date().toISOString().split('T')[0]}.xlsx`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+
+      setToast({ message: 'Report downloaded as Excel workbook!', type: 'success' });
+    } catch (err: any) {
+      setToast({ message: err.message || 'Error generating report', type: 'error' });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col bg-[#FBFBF9]">
+      {/* Top Header */}
+      <TopHeader
+        currentView={currentView}
+        onViewChange={setCurrentView}
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSync={handleSyncExcel}
+        onExport={handleExportExcel}
+        isSyncing={isSyncing}
+        isExporting={isExporting}
+        totalGoals={goals.length}
+        completedCount={completedCount}
+      />
+
+      {/* Unified Executive Progress & Filter Strip (Active in Goals and Timeline views) */}
+      {(currentView === 'roadmap' || currentView === 'board') && (
+        <ExecutivePulse
+          goals={goals}
+          activeStatus={selectedStatus}
+          onFilterStatus={(st) => setSelectedStatus(st as GoalStatus | 'All')}
+          selectedFunction={selectedFunction}
+          onFunctionChange={setSelectedFunction}
+          functionCounts={functionCounts}
+        />
+      )}
+
+      {/* Main Content Area */}
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+        {loading ? (
+          <div className="h-96 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="w-8 h-8 animate-spin text-stone-700" />
+            <span className="text-xs font-mono text-stone-500">
+              Loading IT goals...
+            </span>
+          </div>
+        ) : filteredGoals.length === 0 && goals.length > 0 ? (
+          <div className="p-12 text-center bg-white rounded-xl border border-stone-200 shadow-card">
+            <p className="text-sm font-semibold text-stone-800">No initiatives found for this filter.</p>
+            <p className="text-xs text-stone-500 mt-1">Try clicking &quot;All Categories&quot; or clearing the search box.</p>
+            <button
+              onClick={() => {
+                setSearchQuery('');
+                setSelectedFunction('All');
+                setSelectedStatus('All');
+                setSelectedType('All');
+              }}
+              className="mt-4 px-3.5 py-2 rounded-lg text-xs font-semibold bg-stone-900 text-white hover:bg-stone-800 transition-colors"
+            >
+              Reset Filters
+            </button>
+          </div>
+        ) : (
+          <>
+            {currentView === 'board' && (
+              <BoardView goals={filteredGoals} onSelectGoal={handleSelectGoal} />
+            )}
+
+            {currentView === 'roadmap' && (
+              <RoadmapView goals={filteredGoals} onSelectGoal={handleSelectGoal} />
+            )}
+
+            {currentView === 'cadence' && (
+              <CadenceView
+                goals={goals}
+                onSelectGoal={handleSelectGoal}
+                onUpdateMonthlyLog={handleUpdateMonthlyLog}
+              />
+            )}
+
+            {currentView === 'strategic' && (
+              <StrategicMapView goals={goals} onSelectGoal={handleSelectGoal} />
+            )}
+          </>
+        )}
+      </main>
+
+
+
+      {/* Toast Notification */}
+      {toast && (
+        <Toast
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+    </div>
+  );
+}
