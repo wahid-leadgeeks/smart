@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { Goal, MonthlyLog, ViewMode, DepartmentFunction, GoalStatus, GoalType } from '@/lib/types';
+import type { SessionResponse } from '@/lib/auth/types';
 import { TopHeader } from '@/components/navigation/TopHeader';
 import { ExecutivePulse } from '@/components/navigation/ExecutivePulse';
 import { RoadmapView } from '@/components/views/RoadmapView';
@@ -18,6 +19,7 @@ export default function SmartGoalsDashboard() {
   const [loading, setLoading] = useState(true);
   // Default to board (Goals Overview) for immediate, non-technical readability
   const [currentView, setCurrentView] = useState<ViewMode>('board');
+  const [session, setSession] = useState<SessionResponse | null>(null);
 
   // Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -42,20 +44,53 @@ export default function SmartGoalsDashboard() {
       } else {
         setToast({ message: data.error || 'Failed to fetch goals', type: 'error' });
       }
-    } catch (err: any) {
-      setToast({ message: err.message || 'Network error fetching goals', type: 'error' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Network error fetching goals';
+      setToast({ message, type: 'error' });
     } finally {
       setLoading(false);
     }
   };
 
+  const fetchSession = async () => {
+    try {
+      const res = await fetch('/api/auth/session');
+      const data = (await res.json()) as SessionResponse;
+      setSession(data);
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     fetchGoals();
+    fetchSession();
+
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const v = params.get('view');
       if (v === 'strategic' || v === 'board' || v === 'roadmap' || v === 'cadence') {
         setCurrentView(v as ViewMode);
+      }
+
+      const authStatus = params.get('auth_status');
+      const authError = params.get('auth_error');
+
+      if (authStatus === 'connected') {
+        setToast({ message: 'Connected to Google Sheets successfully!', type: 'success' });
+        params.delete('auth_status');
+        const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+        window.history.replaceState({}, '', newUrl);
+      } else if (authStatus === 'logged_out') {
+        setToast({ message: 'Signed out from Google Sheets.', type: 'info' });
+        params.delete('auth_status');
+        const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+        window.history.replaceState({}, '', newUrl);
+      } else if (authError) {
+        setToast({ message: `Google connection failed: ${authError}`, type: 'error' });
+        params.delete('auth_error');
+        const newUrl = window.location.pathname + (params.toString() ? `?${params.toString()}` : '');
+        window.history.replaceState({}, '', newUrl);
       }
     }
   }, []);
@@ -141,26 +176,49 @@ export default function SmartGoalsDashboard() {
     }
   };
 
-  // Sync with source Excel file
+  // Logout handler
+  const handleLogout = async () => {
+    try {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      setSession({ authenticated: false, user: null });
+      setToast({ message: 'Signed out from Google Sheets.', type: 'info' });
+    } catch {
+      setToast({ message: 'Failed to sign out', type: 'error' });
+    }
+  };
+
+  // Sync with Google Sheets / source Excel file
   const handleSyncExcel = async () => {
-    if (!confirm('Refresh data from the original spreadsheet? This will restore the latest sheet values.')) {
+    const isGoogleLive = Boolean(session?.authenticated);
+    const confirmMessage = isGoogleLive
+      ? 'Sync data from live Google Spreadsheet? This will refresh all goals and monthly logs with the latest values from Google Sheets.'
+      : 'Refresh data from the local master spreadsheet? (Tip: Connect Google Sheet in the header to sync live with cloud).';
+
+    if (!confirm(confirmMessage)) {
       return;
     }
     try {
       setIsSyncing(true);
-      const res = await fetch('/api/sync', { method: 'POST' });
+      const res = await fetch('/api/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: isGoogleLive ? 'google' : 'local' }),
+      });
       const data = await res.json();
       if (data.success) {
+        const sourceLabel =
+          data.source === 'google_sheets' ? 'live Google Sheet' : 'local master spreadsheet';
         setToast({
-          message: `Successfully refreshed ${data.data.goalsCount} goals from the master spreadsheet!`,
+          message: `Successfully refreshed ${data.data.goalsCount} goals from ${sourceLabel}!`,
           type: 'success',
         });
         await fetchGoals();
       } else {
         setToast({ message: data.error || 'Sync failed', type: 'error' });
       }
-    } catch (err: any) {
-      setToast({ message: err.message || 'Error syncing from spreadsheet', type: 'error' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error syncing from spreadsheet';
+      setToast({ message, type: 'error' });
     } finally {
       setIsSyncing(false);
     }
@@ -184,8 +242,9 @@ export default function SmartGoalsDashboard() {
       window.URL.revokeObjectURL(url);
 
       setToast({ message: 'Report downloaded as Excel workbook!', type: 'success' });
-    } catch (err: any) {
-      setToast({ message: err.message || 'Error generating report', type: 'error' });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : 'Error generating report';
+      setToast({ message, type: 'error' });
     } finally {
       setIsExporting(false);
     }
@@ -205,6 +264,8 @@ export default function SmartGoalsDashboard() {
         isExporting={isExporting}
         totalGoals={goals.length}
         completedCount={completedCount}
+        session={session}
+        onLogout={handleLogout}
       />
 
       {/* Unified Executive Progress & Filter Strip (Active in Goals and Timeline views) */}

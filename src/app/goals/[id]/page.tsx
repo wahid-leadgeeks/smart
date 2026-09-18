@@ -256,7 +256,16 @@ export default function GoalDetailPage() {
             </div>
 
             <div className="text-xs font-mono text-stone-500 self-start md:self-auto">
-              Initiative #{goal.id} · Row {goal.row_number}
+              <a
+                href="https://docs.google.com/spreadsheets/d/1vWFuIU_LxCqyQ7Bn5N2K4gBDcIcnmogYA_ALiucWxbo"
+                target="_blank"
+                rel="noopener noreferrer"
+                title="View in Google Sheets"
+                className="inline-flex items-center gap-1 hover:text-stone-800 transition-colors"
+              >
+                <span>Initiative #{goal.id} · Row {goal.row_number}</span>
+                <ExternalLink className="w-3 h-3 text-emerald-600" />
+              </a>
             </div>
           </div>
 

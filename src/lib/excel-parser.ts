@@ -85,12 +85,19 @@ const MONTH_COLUMNS: {
   { monthNumber: 12, monthName: 'December', statusCol: 'CH', linkCol: 'CI', challengeCol: 'CJ', homeworkCol: 'CK' },
 ];
 
-export async function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
-  if (!fs.existsSync(filePath)) {
-    throw new Error(`Excel source file not found at: ${filePath}`);
+export async function seedDatabaseFromExcel(source?: string | Buffer) {
+  let fileBuffer: Buffer;
+
+  if (Buffer.isBuffer(source)) {
+    fileBuffer = source;
+  } else {
+    const filePath = typeof source === 'string' && source ? source : DEFAULT_EXCEL_PATH;
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Excel source file not found at: ${filePath}`);
+    }
+    fileBuffer = fs.readFileSync(filePath);
   }
 
-  const fileBuffer = fs.readFileSync(filePath);
   const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: false });
   const db = await getDb();
 
