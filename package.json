@@ -10,6 +10,7 @@
     "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "better-sqlite3": "^11.3.0",
     "clsx": "^2.1.1",
     "lucide-react": "^0.453.0",

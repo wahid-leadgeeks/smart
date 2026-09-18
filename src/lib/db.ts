@@ -1,28 +1,21 @@
-import Database from 'better-sqlite3';
+import { PGlite } from '@electric-sql/pglite';
 import path from 'path';
 import fs from 'fs';
 import { Goal, MonthlyLog, BigSixObjective } from './types';
 
 const DB_DIR = path.join(process.cwd(), 'data');
-const DB_PATH = path.join(DB_DIR, 'smart_goals.db');
+const PG_DATA_DIR = path.join(DB_DIR, 'pgdata');
 
-let dbInstance: Database.Database | null = null;
+// Preserve singleton across Next.js dev server hot-reloads
+const globalForDb = globalThis as unknown as {
+  pglite: PGlite | undefined;
+  pglitePromise: Promise<PGlite> | undefined;
+};
 
-export function getDb(): Database.Database {
-  if (dbInstance) return dbInstance;
-
-  if (!fs.existsSync(DB_DIR)) {
-    fs.mkdirSync(DB_DIR, { recursive: true });
-  }
-
-  const db = new Database(DB_PATH);
-  db.pragma('journal_mode = WAL');
-  db.pragma('foreign_keys = ON');
-
-  // Initialize schema
-  db.exec(`
+async function initSchema(db: PGlite): Promise<void> {
+  await db.exec(`
     CREATE TABLE IF NOT EXISTS goals (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       row_number INTEGER,
       function TEXT NOT NULL,
       title TEXT NOT NULL,
@@ -57,13 +50,13 @@ export function getDb(): Database.Database {
       accomplishment_status TEXT,
       half_adjustment TEXT,
       notes TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS monthly_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      goal_id INTEGER NOT NULL,
+      id SERIAL PRIMARY KEY,
+      goal_id INTEGER NOT NULL REFERENCES goals (id) ON DELETE CASCADE,
       month_number INTEGER NOT NULL,
       month_name TEXT NOT NULL,
       achievement_status TEXT DEFAULT 'Not started',
@@ -71,12 +64,11 @@ export function getDb(): Database.Database {
       result_url TEXT DEFAULT '',
       challenge TEXT DEFAULT '',
       homework TEXT DEFAULT '',
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (goal_id) REFERENCES goals (id) ON DELETE CASCADE
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS big_six (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      id SERIAL PRIMARY KEY,
       objective_number INTEGER,
       title TEXT NOT NULL,
       status_quo TEXT,
@@ -93,81 +85,125 @@ export function getDb(): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_goals_function ON goals (function);
     CREATE INDEX IF NOT EXISTS idx_goals_status ON goals (status);
   `);
-
-  try {
-    db.prepare(`ALTER TABLE monthly_logs ADD COLUMN result_url TEXT`).run();
-  } catch {}
-  try {
-    db.prepare(`ALTER TABLE big_six ADD COLUMN company_focus TEXT`).run();
-  } catch {}
-  try {
-    db.prepare(`ALTER TABLE big_six ADD COLUMN company_priority TEXT`).run();
-  } catch {}
-
-  dbInstance = db;
-  return dbInstance;
 }
 
-export function getAllGoals(filters?: {
+export async function getDb(): Promise<PGlite> {
+  if (globalForDb.pglite) {
+    return globalForDb.pglite;
+  }
+
+  if (!globalForDb.pglitePromise) {
+    globalForDb.pglitePromise = (async () => {
+      if (!fs.existsSync(DB_DIR)) {
+        fs.mkdirSync(DB_DIR, { recursive: true });
+      }
+      const db = new PGlite(PG_DATA_DIR);
+      await db.waitReady;
+      await initSchema(db);
+      globalForDb.pglite = db;
+      return db;
+    })();
+  }
+
+  return globalForDb.pglitePromise;
+}
+
+export async function getAllGoals(filters?: {
   function?: string;
   status?: string;
   goalType?: string;
   search?: string;
-}): Goal[] {
-  const db = getDb();
+}): Promise<Goal[]> {
+  const db = await getDb();
   let query = `SELECT * FROM goals WHERE 1=1`;
   const params: any[] = [];
 
   if (filters?.function && filters.function !== 'All') {
-    query += ` AND function = ?`;
     params.push(filters.function);
+    query += ` AND function = $${params.length}`;
   }
 
   if (filters?.status && filters.status !== 'All') {
-    query += ` AND status = ?`;
     params.push(filters.status);
+    query += ` AND status = $${params.length}`;
   }
 
   if (filters?.goalType && filters.goalType !== 'All') {
-    query += ` AND goal_type = ?`;
     params.push(filters.goalType);
+    query += ` AND goal_type = $${params.length}`;
   }
 
   if (filters?.search && filters.search.trim() !== '') {
-    query += ` AND (title LIKE ? OR specific_statement LIKE ? OR target LIKE ? OR action_plan LIKE ?)`;
     const s = `%${filters.search.trim()}%`;
-    params.push(s, s, s, s);
+    params.push(s);
+    const pIndex = params.length;
+    query += ` AND (title ILIKE $${pIndex} OR specific_statement ILIKE $${pIndex} OR target ILIKE $${pIndex} OR action_plan ILIKE $${pIndex})`;
   }
 
   query += ` ORDER BY id ASC`;
 
-  const rows = db.prepare(query).all(...params) as Goal[];
+  const goalsRes = await db.query<Goal>(query, params);
+  const rows = goalsRes.rows;
 
-  // Also attach monthly logs summary to each goal
-  const logsStmt = db.prepare(`SELECT * FROM monthly_logs WHERE goal_id = ? ORDER BY month_number ASC`);
+  if (rows.length === 0) return [];
+
+  // Fetch all monthly logs in a single query
+  const goalIds = rows.map((g) => g.id);
+  const logsRes = await db.query<MonthlyLog>(
+    `SELECT * FROM monthly_logs WHERE goal_id = ANY($1) ORDER BY month_number ASC`,
+    [goalIds]
+  );
+
+  const logsByGoalId = new Map<number, MonthlyLog[]>();
+  for (const log of logsRes.rows) {
+    const list = logsByGoalId.get(log.goal_id) || [];
+    list.push(log);
+    logsByGoalId.set(log.goal_id, list);
+  }
+
   return rows.map((goal) => ({
     ...goal,
-    monthly_logs: logsStmt.all(goal.id) as MonthlyLog[],
+    created_at: goal.created_at ? new Date(goal.created_at).toISOString() : undefined,
+    updated_at: goal.updated_at ? new Date(goal.updated_at).toISOString() : undefined,
+    monthly_logs: (logsByGoalId.get(goal.id) || []).map((l) => ({
+      ...l,
+      updated_at: l.updated_at ? new Date(l.updated_at).toISOString() : undefined,
+    })),
   }));
 }
 
-export function getGoalById(id: number): Goal | null {
-  const db = getDb();
-  let goal = db.prepare(`SELECT * FROM goals WHERE id = ?`).get(id) as Goal | undefined;
+export async function getGoalById(id: number): Promise<Goal | null> {
+  const db = await getDb();
+  let res = await db.query<Goal>(`SELECT * FROM goals WHERE id = $1`, [id]);
+  let goal = res.rows[0];
+
   if (!goal) {
-    goal = db.prepare(`SELECT * FROM goals WHERE row_number = ? OR row_number = ?`).get(id, id + 2) as Goal | undefined;
+    res = await db.query<Goal>(
+      `SELECT * FROM goals WHERE row_number = $1 OR row_number = $2`,
+      [id, id + 2]
+    );
+    goal = res.rows[0];
   }
   if (!goal) return null;
 
-  const logs = db.prepare(`SELECT * FROM monthly_logs WHERE goal_id = ? ORDER BY month_number ASC`).all(goal.id) as MonthlyLog[];
+  const logsRes = await db.query<MonthlyLog>(
+    `SELECT * FROM monthly_logs WHERE goal_id = $1 ORDER BY month_number ASC`,
+    [goal.id]
+  );
+
   return {
     ...goal,
-    monthly_logs: logs,
+    created_at: goal.created_at ? new Date(goal.created_at).toISOString() : undefined,
+    updated_at: goal.updated_at ? new Date(goal.updated_at).toISOString() : undefined,
+    monthly_logs: logsRes.rows.map((l) => ({
+      ...l,
+      updated_at: l.updated_at ? new Date(l.updated_at).toISOString() : undefined,
+    })),
   };
 }
 
-export function updateGoal(id: number, data: Partial<Goal>): Goal | null {
-  const db = getDb();
+export async function updateGoal(id: number, data: Partial<Goal>): Promise<Goal | null> {
+  const db = await getDb();
   const allowedFields = [
     'title', 'function', 'specific_statement', 'action_plan', 'target', 'the_way',
     'goal_type', 'owner', 'pic', 'collaborators', 'collaboration_flag', 'type',
@@ -183,47 +219,59 @@ export function updateGoal(id: number, data: Partial<Goal>): Goal | null {
 
   for (const field of allowedFields) {
     if (field in data) {
-      updates.push(`${field} = ?`);
       params.push((data as any)[field]);
+      updates.push(`${field} = $${params.length}`);
     }
   }
 
   if (updates.length > 0) {
     updates.push(`updated_at = CURRENT_TIMESTAMP`);
     params.push(id);
-    const sql = `UPDATE goals SET ${updates.join(', ')} WHERE id = ?`;
-    db.prepare(sql).run(...params);
+    const sql = `UPDATE goals SET ${updates.join(', ')} WHERE id = $${params.length}`;
+    await db.query(sql, params);
   }
 
   return getGoalById(id);
 }
 
-export function updateMonthlyLog(id: number, data: Partial<MonthlyLog>): MonthlyLog | null {
-  const db = getDb();
+export async function updateMonthlyLog(id: number, data: Partial<MonthlyLog>): Promise<MonthlyLog | null> {
+  const db = await getDb();
   const updates: string[] = [];
   const params: any[] = [];
 
   const allowedFields = ['achievement_status', 'result_link', 'result_url', 'challenge', 'homework'];
   for (const field of allowedFields) {
     if (field in data) {
-      updates.push(`${field} = ?`);
       params.push((data as any)[field]);
+      updates.push(`${field} = $${params.length}`);
     }
   }
 
   if (updates.length > 0) {
     updates.push(`updated_at = CURRENT_TIMESTAMP`);
     params.push(id);
-    const sql = `UPDATE monthly_logs SET ${updates.join(', ')} WHERE id = ?`;
-    db.prepare(sql).run(...params);
+    const sql = `UPDATE monthly_logs SET ${updates.join(', ')} WHERE id = $${params.length} RETURNING *`;
+    const res = await db.query<MonthlyLog>(sql, params);
+    const log = res.rows[0];
+    if (!log) return null;
+    return {
+      ...log,
+      updated_at: log.updated_at ? new Date(log.updated_at).toISOString() : undefined,
+    };
   }
 
-  return db.prepare(`SELECT * FROM monthly_logs WHERE id = ?`).get(id) as MonthlyLog | null;
+  const res = await db.query<MonthlyLog>(`SELECT * FROM monthly_logs WHERE id = $1`, [id]);
+  const log = res.rows[0];
+  if (!log) return null;
+  return {
+    ...log,
+    updated_at: log.updated_at ? new Date(log.updated_at).toISOString() : undefined,
+  };
 }
 
-export function getMonthlyGrid(monthNumber: number) {
-  const db = getDb();
-  const rows = db.prepare(`
+export async function getMonthlyGrid(monthNumber: number) {
+  const db = await getDb();
+  const res = await db.query(`
     SELECT 
       g.id as goal_id,
       g.title as goal_title,
@@ -242,14 +290,18 @@ export function getMonthlyGrid(monthNumber: number) {
       m.homework,
       m.updated_at
     FROM goals g
-    LEFT JOIN monthly_logs m ON g.id = m.goal_id AND m.month_number = ?
+    LEFT JOIN monthly_logs m ON g.id = m.goal_id AND m.month_number = $1
     ORDER BY g.id ASC
-  `).all(monthNumber);
+  `, [monthNumber]);
 
-  return rows;
+  return res.rows.map((r: any) => ({
+    ...r,
+    updated_at: r.updated_at ? new Date(r.updated_at).toISOString() : undefined,
+  }));
 }
 
-export function getBigSix(): BigSixObjective[] {
-  const db = getDb();
-  return db.prepare(`SELECT * FROM big_six ORDER BY objective_number ASC`).all() as BigSixObjective[];
+export async function getBigSix(): Promise<BigSixObjective[]> {
+  const db = await getDb();
+  const res = await db.query<BigSixObjective>(`SELECT * FROM big_six ORDER BY objective_number ASC`);
+  return res.rows;
 }

@@ -12,13 +12,13 @@ export async function GET(request: NextRequest) {
     const goalType = searchParams.get('goalType') || undefined;
     const search = searchParams.get('search') || undefined;
 
-    let goals = getAllGoals({ function: fn, status, goalType, search });
+    let goals = await getAllGoals({ function: fn, status, goalType, search });
 
     // If database is empty, auto-seed from Excel
     if (goals.length === 0 && !search && !fn && !status && !goalType) {
       console.log('Auto-seeding database from Excel...');
-      seedDatabaseFromExcel();
-      goals = getAllGoals();
+      await seedDatabaseFromExcel();
+      goals = await getAllGoals();
     }
 
     return NextResponse.json({ success: true, data: goals });

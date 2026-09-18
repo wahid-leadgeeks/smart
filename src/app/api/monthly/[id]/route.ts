@@ -14,7 +14,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const updated = updateMonthlyLog(id, body);
+    const updated = await updateMonthlyLog(id, body);
     if (!updated) {
       return NextResponse.json({ success: false, error: 'Monthly log not found' }, { status: 404 });
     }

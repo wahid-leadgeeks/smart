@@ -6,9 +6,9 @@ const MONTH_NAMES = [
   'July', 'August', 'September', 'October', 'November', 'December'
 ];
 
-export function exportGoalsToExcelBuffer(): Buffer {
-  const goals = getAllGoals();
-  const bigSix = getBigSix();
+export async function exportGoalsToExcelBuffer(): Promise<Buffer> {
+  const goals = await getAllGoals();
+  const bigSix = await getBigSix();
 
   const wb = XLSX.utils.book_new();
 

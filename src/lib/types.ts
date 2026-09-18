@@ -72,6 +72,8 @@ export interface Goal {
   half_adjustment?: string;
   notes?: string;
   monthly_logs?: MonthlyLog[];
+  created_at?: string;
+  updated_at?: string;
 }
 
 export interface BigSixObjective {

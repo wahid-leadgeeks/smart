@@ -13,7 +13,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Invalid ID' }, { status: 400 });
     }
 
-    const goal = getGoalById(id);
+    const goal = await getGoalById(id);
     if (!goal) {
       return NextResponse.json({ success: false, error: 'Goal not found' }, { status: 404 });
     }
@@ -35,7 +35,7 @@ export async function PUT(
     }
 
     const body = await request.json();
-    const updated = updateGoal(id, body);
+    const updated = await updateGoal(id, body);
     if (!updated) {
       return NextResponse.json({ success: false, error: 'Goal not found' }, { status: 404 });
     }

@@ -5,7 +5,7 @@ export const dynamic = 'force-dynamic';
 
 export async function POST(request: NextRequest) {
   try {
-    const stats = seedDatabaseFromExcel();
+    const stats = await seedDatabaseFromExcel();
     return NextResponse.json({
       success: true,
       message: 'Database successfully re-seeded from source Excel file.',

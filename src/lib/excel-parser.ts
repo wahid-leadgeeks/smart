@@ -85,13 +85,14 @@ const MONTH_COLUMNS: {
   { monthNumber: 12, monthName: 'December', statusCol: 'CH', linkCol: 'CI', challengeCol: 'CJ', homeworkCol: 'CK' },
 ];
 
-export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
+export async function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`Excel source file not found at: ${filePath}`);
   }
 
-  const workbook = XLSX.readFile(filePath, { cellDates: false });
-  const db = getDb();
+  const fileBuffer = fs.readFileSync(filePath);
+  const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: false });
+  const db = await getDb();
 
   const iteSheet = workbook.Sheets['ITE'];
   if (!iteSheet) {
@@ -100,24 +101,19 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
 
   const bigSixSheet = workbook.Sheets['The BIG Six'];
 
-  const runSeed = db.transaction(() => {
-    // Clear existing
-    db.prepare(`DELETE FROM monthly_logs`).run();
-    db.prepare(`DELETE FROM goals`).run();
-    db.prepare(`DELETE FROM big_six`).run();
-    try {
-      db.prepare(`DELETE FROM sqlite_sequence WHERE name IN ('goals', 'monthly_logs', 'big_six')`).run();
-    } catch {}
+  await db.transaction(async (tx) => {
+    // Clear existing tables and reset identity sequences in Postgres
+    await tx.exec(`TRUNCATE TABLE monthly_logs, goals, big_six RESTART IDENTITY CASCADE;`);
 
     // 1. Seed The BIG Six if available
     if (bigSixSheet) {
-      const insertBigSix = db.prepare(`
+      const insertBigSixQuery = `
         INSERT INTO big_six (
           objective_number, title, status_quo, strategic_objective,
           focus_area, pic, focus_category, company_focus, company_priority
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `);
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `;
 
       let currentObjectiveNumber = 1;
       let currentTitle = '';
@@ -142,7 +138,7 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
         if (stratCell) currentStrategicObjective = stratCell;
 
         if (focusCell) {
-          insertBigSix.run(
+          await tx.query(insertBigSixQuery, [
             currentObjectiveNumber,
             currentTitle,
             currentStatusQuo,
@@ -151,14 +147,14 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
             picCell,
             priorityCell,
             companyFocusCell,
-            priorityCell
-          );
+            priorityCell,
+          ]);
         }
       }
     }
 
     // 2. Seed Goals and Monthly Logs from ITE Sheet
-    const insertGoal = db.prepare(`
+    const insertGoalQuery = `
       INSERT INTO goals (
         row_number, function, title, specific_statement, action_plan, target, the_way,
         goal_type, owner, pic, collaborators, collaboration_flag, type, period,
@@ -167,20 +163,20 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
         company_focus_ref, start_date, end_date, day_counter, status, accomplishment_status,
         half_adjustment, notes
       ) VALUES (
-        ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?,
-        ?, ?, ?, ?, ?, ?,
-        ?, ?
-      )
-    `);
+        $1, $2, $3, $4, $5, $6, $7,
+        $8, $9, $10, $11, $12, $13, $14,
+        $15, $16, $17, $18, $19, $20, $21,
+        $22, $23, $24, $25, $26,
+        $27, $28, $29, $30, $31, $32,
+        $33, $34
+      ) RETURNING id
+    `;
 
-    const insertMonthly = db.prepare(`
+    const insertMonthlyQuery = `
       INSERT INTO monthly_logs (
         goal_id, month_number, month_name, achievement_status, result_link, result_url, challenge, homework
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    `;
 
     // In ITE, goals start from row 3 up to row 21
     for (let r = 3; r <= 25; r++) {
@@ -228,7 +224,7 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
       const notes = iteSheet[`Z${r}`]?.v ? String(iteSheet[`Z${r}`].v).trim() : '';
       const halfAdjustment = iteSheet[`AA${r}`]?.v ? String(iteSheet[`AA${r}`].v).trim() : '';
 
-      const info = insertGoal.run(
+      const res = await tx.query<{ id: number }>(insertGoalQuery, [
         r,
         fn,
         title,
@@ -262,10 +258,10 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
         status,
         accomplishmentStatus,
         halfAdjustment,
-        notes
-      );
+        notes,
+      ]);
 
-      const goalId = Number(info.lastInsertRowid);
+      const goalId = res.rows[0].id;
 
       // Insert 12 monthly log records
       for (const m of MONTH_COLUMNS) {
@@ -280,7 +276,7 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
         const mChallenge = iteSheet[`${m.challengeCol}${r}`]?.v ? String(iteSheet[`${m.challengeCol}${r}`].v).trim() : '-';
         const mHomework = iteSheet[`${m.homeworkCol}${r}`]?.v ? String(iteSheet[`${m.homeworkCol}${r}`].v).trim() : '-';
 
-        insertMonthly.run(
+        await tx.query(insertMonthlyQuery, [
           goalId,
           m.monthNumber,
           m.monthName,
@@ -288,21 +284,19 @@ export function seedDatabaseFromExcel(filePath: string = DEFAULT_EXCEL_PATH) {
           mLink,
           mUrl,
           mChallenge,
-          mHomework
-        );
+          mHomework,
+        ]);
       }
     }
   });
 
-  runSeed();
-
-  const count = (db.prepare(`SELECT COUNT(*) as c FROM goals`).get() as any).c;
-  const monthCount = (db.prepare(`SELECT COUNT(*) as c FROM monthly_logs`).get() as any).c;
-  const bigSixCount = (db.prepare(`SELECT COUNT(*) as c FROM big_six`).get() as any).c;
+  const count = (await db.query<{ count: string }>(`SELECT COUNT(*) as count FROM goals`)).rows[0].count;
+  const monthCount = (await db.query<{ count: string }>(`SELECT COUNT(*) as count FROM monthly_logs`)).rows[0].count;
+  const bigSixCount = (await db.query<{ count: string }>(`SELECT COUNT(*) as count FROM big_six`)).rows[0].count;
 
   return {
-    goalsCount: count,
-    monthlyLogsCount: monthCount,
-    bigSixCount: bigSixCount,
+    goalsCount: parseInt(count, 10),
+    monthlyLogsCount: parseInt(monthCount, 10),
+    bigSixCount: parseInt(bigSixCount, 10),
   };
 }
