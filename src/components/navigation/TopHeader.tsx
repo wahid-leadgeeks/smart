@@ -26,6 +26,7 @@ interface TopHeaderProps {
   onSearchChange: (q: string) => void;
   onSync: () => void;
   onExport: () => void;
+  onOpenGoogleModal?: () => void;
   isSyncing: boolean;
   isExporting: boolean;
   totalGoals: number;
@@ -52,6 +53,7 @@ export function TopHeader({
   onSearchChange,
   onSync,
   onExport,
+  onOpenGoogleModal,
   isSyncing,
   isExporting,
   totalGoals,
@@ -229,17 +231,26 @@ export function TopHeader({
 
             {/* Google Sheets Status & Direct Link */}
             <div className="hidden sm:flex items-center gap-1.5" ref={profileRef}>
-              <a
-                href={spreadsheetUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                title="Open master Google Sheet in new tab"
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-lg border border-stone-200 bg-white hover:bg-stone-50 text-stone-600 hover:text-stone-900 text-xs font-medium transition shadow-subtle"
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
-                <span className="hidden xl:inline text-[11px] font-mono">Google Sheet</span>
-                <ExternalLink className="w-3 h-3 text-stone-400" />
-              </a>
+              <div className="inline-flex items-center rounded-lg border border-stone-200 bg-white shadow-subtle overflow-hidden">
+                <button
+                  type="button"
+                  onClick={onOpenGoogleModal}
+                  title="Google Sheets & Drive Integration (Import or switch spreadsheet)"
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-stone-700 hover:text-stone-900 hover:bg-stone-50 text-xs font-medium transition"
+                >
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="text-[11px] font-mono font-medium">Google Sheet</span>
+                </button>
+                <a
+                  href={spreadsheetUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="Open active Google Sheet in new tab"
+                  className="px-1.5 py-1 border-l border-stone-200 text-stone-400 hover:text-stone-700 hover:bg-stone-50 transition flex items-center"
+                >
+                  <ExternalLink className="w-3 h-3" />
+                </a>
+              </div>
 
               {session?.authenticated && session.user ? (
                 <div className="relative">
@@ -298,29 +309,44 @@ export function TopHeader({
                         </p>
                       </div>
 
-                      <div className="pt-2 border-t border-stone-100 flex items-center justify-between">
-                        <a
-                          href={spreadsheetUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-stone-600 hover:text-stone-900 font-medium flex items-center gap-1"
-                        >
-                          <span>Open Sheet</span>
-                          <ExternalLink className="w-3 h-3" />
-                        </a>
-                        {onLogout && (
+                      <div className="pt-2 border-t border-stone-100 space-y-1.5">
+                        {onOpenGoogleModal && (
                           <button
                             type="button"
                             onClick={() => {
                               setProfileOpen(false);
-                              onLogout();
+                              onOpenGoogleModal();
                             }}
-                            className="text-red-600 hover:text-red-700 font-medium flex items-center gap-1"
+                            className="w-full text-left py-1 text-stone-700 hover:text-stone-900 font-medium flex items-center justify-between"
                           >
-                            <LogOut className="w-3 h-3" />
-                            <span>Sign out</span>
+                            <span>Drive & Sheets Manager</span>
+                            <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600" />
                           </button>
                         )}
+                        <div className="flex items-center justify-between pt-1 border-t border-stone-50">
+                          <a
+                            href={spreadsheetUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-stone-600 hover:text-stone-900 font-medium flex items-center gap-1"
+                          >
+                            <span>Open Sheet</span>
+                            <ExternalLink className="w-3 h-3" />
+                          </a>
+                          {onLogout && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setProfileOpen(false);
+                                onLogout();
+                              }}
+                              className="text-red-600 hover:text-red-700 font-medium flex items-center gap-1"
+                            >
+                              <LogOut className="w-3 h-3" />
+                              <span>Sign out</span>
+                            </button>
+                          )}
+                        </div>
                       </div>
                     </div>
                   )}

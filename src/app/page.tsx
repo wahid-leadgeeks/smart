@@ -11,6 +11,8 @@ import { BoardView } from '@/components/views/BoardView';
 import { CadenceView } from '@/components/views/CadenceView';
 import { StrategicMapView } from '@/components/views/StrategicMapView';
 import { Toast } from '@/components/ui/Toast';
+import { GoogleSpreadsheetModal } from '@/components/modals/GoogleSpreadsheetModal';
+import { ConfirmDialog } from '@/components/modals/ConfirmDialog';
 import { Loader2 } from 'lucide-react';
 
 export default function SmartGoalsDashboard() {
@@ -27,9 +29,16 @@ export default function SmartGoalsDashboard() {
   const [selectedStatus, setSelectedStatus] = useState<GoalStatus | 'All'>('All');
   const [selectedType, setSelectedType] = useState<GoalType | 'All'>('All');
 
-  // Sync / Export states
+  // Sync / Export / Modal states
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
+  const [confirmDialog, setConfirmDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  } | null>(null);
 
   // Notifications
   const [toast, setToast] = useState<{ message: string; type?: 'success' | 'error' | 'info' } | null>(null);
@@ -187,27 +196,19 @@ export default function SmartGoalsDashboard() {
     }
   };
 
-  // Sync with Google Sheets / source Excel file
-  const handleSyncExcel = async () => {
-    const isGoogleLive = Boolean(session?.authenticated);
-    const confirmMessage = isGoogleLive
-      ? 'Sync data from live Google Spreadsheet? This will refresh all goals and monthly logs with the latest values from Google Sheets.'
-      : 'Refresh data from the local master spreadsheet? (Tip: Connect Google Sheet in the header to sync live with cloud).';
-
-    if (!confirm(confirmMessage)) {
-      return;
-    }
+  // Core sync runner
+  const executeSync = async (source: 'google' | 'local') => {
     try {
       setIsSyncing(true);
       const res = await fetch('/api/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ source: isGoogleLive ? 'google' : 'local' }),
+        body: JSON.stringify({ source }),
       });
       const data = await res.json();
       if (data.success) {
         const sourceLabel =
-          data.source === 'google_sheets' ? 'live Google Sheet' : 'local master spreadsheet';
+          data.source === 'google_sheets' ? 'live Google Sheet' : 'master spreadsheet';
         setToast({
           message: `Successfully refreshed ${data.data.goalsCount} goals from ${sourceLabel}!`,
           type: 'success',
@@ -221,7 +222,24 @@ export default function SmartGoalsDashboard() {
       setToast({ message, type: 'error' });
     } finally {
       setIsSyncing(false);
+      setConfirmDialog(null);
     }
+  };
+
+  // Sync with Google Sheets / source Excel file
+  const handleSyncExcel = () => {
+    const isGoogleLive = Boolean(session?.authenticated);
+    const confirmTitle = isGoogleLive ? 'Sync with Live Google Sheet' : 'Refresh from Master Spreadsheet';
+    const confirmMessage = isGoogleLive
+      ? 'Sync data from live Google Spreadsheet? This will refresh all goals, monthly logs, and strategic priorities in the PostgreSQL database with the latest values from Google Sheets.'
+      : 'Refresh data from the master spreadsheet template? (Tip: Connect Google Sheet in the header to sync live with cloud).';
+
+    setConfirmDialog({
+      isOpen: true,
+      title: confirmTitle,
+      message: confirmMessage,
+      onConfirm: () => executeSync(isGoogleLive ? 'google' : 'local'),
+    });
   };
 
   // Export current live database to .xlsx
@@ -260,6 +278,7 @@ export default function SmartGoalsDashboard() {
         onSearchChange={setSearchQuery}
         onSync={handleSyncExcel}
         onExport={handleExportExcel}
+        onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
         isSyncing={isSyncing}
         isExporting={isExporting}
         totalGoals={goals.length}
@@ -330,7 +349,29 @@ export default function SmartGoalsDashboard() {
         )}
       </main>
 
+      {/* Google Sheets & Drive Manager Modal */}
+      <GoogleSpreadsheetModal
+        isOpen={isGoogleModalOpen}
+        onClose={() => setIsGoogleModalOpen(false)}
+        session={session}
+        onSyncSuccess={() => {
+          fetchGoals();
+          fetchSession();
+        }}
+      />
 
+      {/* Confirmation Dialog */}
+      {confirmDialog && (
+        <ConfirmDialog
+          isOpen={confirmDialog.isOpen}
+          title={confirmDialog.title}
+          message={confirmDialog.message}
+          confirmLabel="Sync Data"
+          isLoading={isSyncing}
+          onConfirm={confirmDialog.onConfirm}
+          onCancel={() => setConfirmDialog(null)}
+        />
+      )}
 
       {/* Toast Notification */}
       {toast && (

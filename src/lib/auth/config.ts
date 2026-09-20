@@ -5,6 +5,7 @@ export const GOOGLE_OAUTH_SCOPES = [
   'email',
   'profile',
   'https://www.googleapis.com/auth/spreadsheets',
+  'https://www.googleapis.com/auth/drive.readonly',
 ] as const;
 
 export interface GoogleOAuthConfig {
@@ -16,11 +17,12 @@ export interface GoogleOAuthConfig {
 
 /**
  * Resolves the Google OAuth redirect URI in order of priority:
- * 1. Explicit custom redirect URI
+ * 1. Explicit custom redirect URI argument
  * 2. Explicit GOOGLE_REDIRECT_URI environment variable
  * 3. Incoming HTTP Request headers (x-forwarded-host / host, x-forwarded-proto)
- * 4. Vercel deployment URL
- * 5. Default localhost callback URL
+ * 4. NEXT_PUBLIC_APP_URL or APP_URL environment variable
+ * 5. Vercel deployment URL (VERCEL_PROJECT_PRODUCTION_URL, VERCEL_URL)
+ * 6. Default localhost callback URL
  */
 export function resolveRedirectUri(request?: Request, customRedirectUri?: string): string {
   if (customRedirectUri?.trim()) {
@@ -50,11 +52,17 @@ export function resolveRedirectUri(request?: Request, customRedirectUri?: string
     }
   }
 
+  const explicitAppUrl = process.env.NEXT_PUBLIC_APP_URL || process.env.APP_URL;
+  if (explicitAppUrl?.trim()) {
+    const cleanAppUrl = explicitAppUrl.trim().replace(/\/+$/, '');
+    return `${cleanAppUrl}/api/auth/callback/google`;
+  }
+
   const vercelUrl =
     process.env.VERCEL_PROJECT_PRODUCTION_URL?.trim() ||
     process.env.VERCEL_URL?.trim();
   if (vercelUrl) {
-    const cleanUrl = vercelUrl.replace(/^https?:\/\//, '');
+    const cleanUrl = vercelUrl.replace(/^https?:\/\//, '').replace(/\/+$/, '');
     return `https://${cleanUrl}/api/auth/callback/google`;
   }
 

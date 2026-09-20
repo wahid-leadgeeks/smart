@@ -1,3 +1,13 @@
+export interface GoogleDriveFile {
+  id: string;
+  name: string;
+  mimeType: string;
+  modifiedTime?: string;
+  webViewLink?: string;
+  iconLink?: string;
+  size?: string;
+}
+
 export interface GoogleSheetsMetadata {
   spreadsheetId: string;
   title: string;
@@ -17,14 +27,74 @@ export interface UpdateCellResult {
 }
 
 /**
+ * Extracts a Google Spreadsheet / File ID from various URL formats or raw ID string.
+ * Supports:
+ * - https://docs.google.com/spreadsheets/d/<ID>/...
+ * - https://drive.google.com/file/d/<ID>/...
+ * - ?id=<ID>
+ * - Raw ID string
+ */
+export function extractGoogleFileId(input: string): string {
+  if (!input) return '';
+  const trimmed = input.trim();
+
+  const pathMatch = trimmed.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (pathMatch) return pathMatch[1];
+
+  const queryMatch = trimmed.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  if (queryMatch) return queryMatch[1];
+
+  return trimmed;
+}
+
+/**
+ * Builds a direct web URL to view the Google Spreadsheet.
+ */
+export function buildGoogleSpreadsheetUrl(spreadsheetId: string): string {
+  const cleanId = extractGoogleFileId(spreadsheetId);
+  return `https://docs.google.com/spreadsheets/d/${cleanId}`;
+}
+
+/**
+ * Lists Google Sheets and Excel files available in the authenticated user's Google Drive.
+ */
+export async function listDriveSpreadsheets(accessToken: string): Promise<GoogleDriveFile[]> {
+  const query = encodeURIComponent(
+    "(mimeType = 'application/vnd.google-apps.spreadsheet' or mimeType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' or name contains '.xlsx') and trashed = false"
+  );
+  const fields = encodeURIComponent('files(id,name,mimeType,modifiedTime,webViewLink,iconLink,size)');
+  const url = `https://www.googleapis.com/drive/v3/files?q=${query}&fields=${fields}&orderBy=modifiedTime%20desc&pageSize=25`;
+
+  try {
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      console.warn('Google Drive files list warning:', res.status, errText);
+      return [];
+    }
+
+    const data = (await res.json()) as { files?: GoogleDriveFile[] };
+    return data.files || [];
+  } catch (err) {
+    console.error('Failed to list Google Drive spreadsheets:', err);
+    return [];
+  }
+}
+
+/**
  * Fetches Google Spreadsheet metadata (spreadsheet title, list of sheets, dimensions)
  */
 export async function fetchGoogleSheetMetadata(
   spreadsheetId: string,
   accessToken: string
 ): Promise<GoogleSheetsMetadata> {
+  const cleanId = extractGoogleFileId(spreadsheetId);
   const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(
-    spreadsheetId
+    cleanId
   )}?fields=properties.title,sheets.properties`;
 
   const res = await fetch(url, {
@@ -65,39 +135,96 @@ export async function fetchGoogleSheetMetadata(
   }));
 
   return {
-    spreadsheetId,
+    spreadsheetId: cleanId,
     title: docTitle,
     sheets,
   };
 }
 
 /**
- * Downloads the entire Google Spreadsheet as an Excel (.xlsx) file buffer using Google Drive/Docs export
+ * Downloads a spreadsheet or Excel file from Google (Drive or Sheets) as a binary Buffer.
+ * Supports:
+ * - Native Google Sheets (exported to .xlsx)
+ * - Binary Excel (.xlsx) files stored on Google Drive (downloaded via alt=media)
+ */
+export async function downloadSpreadsheetBufferFromGoogle(
+  fileOrSpreadsheetId: string,
+  accessToken: string
+): Promise<{ buffer: Buffer; fileName: string; mimeType: string }> {
+  const fileId = extractGoogleFileId(fileOrSpreadsheetId);
+
+  // 1. Inspect Drive metadata to check file type
+  let driveMeta: { name?: string; mimeType?: string } | null = null;
+  try {
+    const metaRes = await fetch(
+      `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType`,
+      {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        cache: 'no-store',
+      }
+    );
+    if (metaRes.ok) {
+      driveMeta = await metaRes.json();
+    }
+  } catch {
+    // Ignore Drive metadata lookup failure and attempt direct export
+  }
+
+  const fileName = driveMeta?.name || 'Google_Spreadsheet.xlsx';
+  const mimeType = driveMeta?.mimeType || 'application/vnd.google-apps.spreadsheet';
+
+  // 2. If it's a binary Excel file (.xlsx) stored in Google Drive, download directly
+  if (mimeType.includes('openxmlformats') || fileName.toLowerCase().endsWith('.xlsx')) {
+    const dlUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`;
+    const dlRes = await fetch(dlUrl, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
+    if (dlRes.ok) {
+      const arr = await dlRes.arrayBuffer();
+      return { buffer: Buffer.from(arr), fileName, mimeType };
+    }
+  }
+
+  // 3. For Google Sheets: export via Google Docs export endpoint
+  const exportUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(fileId)}/export?format=xlsx`;
+  const res = await fetch(exportUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: 'no-store',
+  });
+
+  if (res.ok) {
+    const arrayBuffer = await res.arrayBuffer();
+    return { buffer: Buffer.from(arrayBuffer), fileName, mimeType };
+  }
+
+  // 4. Drive API v3 export fallback
+  const driveExportUrl = `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(
+    fileId
+  )}/export?mimeType=application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`;
+  const driveExpRes = await fetch(driveExportUrl, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+    cache: 'no-store',
+  });
+
+  if (driveExpRes.ok) {
+    const arr = await driveExpRes.arrayBuffer();
+    return { buffer: Buffer.from(arr), fileName, mimeType };
+  }
+
+  const errText = await res.text().catch(() => '');
+  throw new Error(`Failed to export Google Sheet as Excel (${res.status}): ${errText.slice(0, 200)}`);
+}
+
+/**
+ * Backward-compatible helper to download Google Spreadsheet as an Excel (.xlsx) Buffer.
  */
 export async function fetchGoogleSpreadsheetBuffer(
   spreadsheetId: string,
   accessToken: string
 ): Promise<Buffer> {
-  const exportUrl = `https://docs.google.com/spreadsheets/d/${encodeURIComponent(
-    spreadsheetId
-  )}/export?format=xlsx`;
-
-  const res = await fetch(exportUrl, {
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-    },
-    cache: 'no-store',
-  });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(
-      `Failed to export Google Sheet as Excel (${res.status}): ${errText.slice(0, 200)}`
-    );
-  }
-
-  const arrayBuffer = await res.arrayBuffer();
-  return Buffer.from(arrayBuffer);
+  const result = await downloadSpreadsheetBufferFromGoogle(spreadsheetId, accessToken);
+  return result.buffer;
 }
 
 /**
