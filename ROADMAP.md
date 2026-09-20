@@ -12,6 +12,7 @@
 [x] Phase 4: Persistence, Drawer & Edit Workflows
 [x] Phase 5: Excel Sync & Export Engine
 [x] Phase 6: Quality Assurance & Build Verification
+[x] Phase 7: Vercel Cloud Deployment & Google Drive Integration
 ```
 
 ---
@@ -77,3 +78,17 @@
 - [x] Verify responsive layout across desktop and tablet
 - [x] Verify all 19 goals and 228 monthly cells are accurate
 - [x] Final end-to-end verification walkthrough
+
+---
+
+## Phase 7: Vercel Cloud Deployment & Google Drive Integration
+- [x] Remote PostgreSQL configuration supporting Aiven PostgreSQL with SSL
+- [x] Dynamic database client abstraction (`DatabaseClient`) supporting both remote `pg.Pool` and embedded `PGlite`
+- [x] Serverless filesystem safety (no read-only filesystem errors on `/var/task`)
+- [x] Auto-seeding on fresh deployments from bundled template `data/seed-template.xlsx`
+- [x] Google OAuth scopes updated for Google Spreadsheets and Google Drive (`drive.readonly`)
+- [x] Google Drive file listing endpoint (`GET /api/google/files`)
+- [x] Unified spreadsheet download supporting both native Google Sheets and uploaded `.xlsx` files
+- [x] Google Sheets & Drive Manager Modal (`GoogleSpreadsheetModal.tsx`) for browsing, opening, and importing files
+- [x] Replaced browser `confirm()` with custom `ConfirmDialog.tsx` modal
+- [x] Created `vercel.json` deployment manifest and `docs/VERCEL_DEPLOYMENT.md` guide

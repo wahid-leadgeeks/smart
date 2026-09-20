@@ -1,7 +1,20 @@
+import fs from 'fs';
+import path from 'path';
+
+// Automatically load .env.local if present
+const envLocalPath = path.join(process.cwd(), '.env.local');
+if (fs.existsSync(envLocalPath)) {
+  if (typeof (process as any).loadEnvFile === 'function') {
+    (process as any).loadEnvFile(envLocalPath);
+  }
+}
+
 import { seedDatabaseFromExcel } from '../src/lib/excel-parser';
 
 async function main() {
-  console.log('🌱 Starting PGlite database seeding from Excel...');
+  const dbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+  const targetLabel = dbUrl ? 'remote PostgreSQL (Aiven)' : 'local PGlite';
+  console.log(`🌱 Starting database seeding from Excel to ${targetLabel}...`);
   try {
     const result = await seedDatabaseFromExcel();
     console.log('✅ Seeding completed successfully!');

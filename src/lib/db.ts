@@ -1,18 +1,105 @@
+import { Pool } from 'pg';
 import { PGlite } from '@electric-sql/pglite';
 import path from 'path';
 import fs from 'fs';
 import { Goal, MonthlyLog, BigSixObjective } from './types';
 
-const DB_DIR = path.join(process.cwd(), 'data');
+export interface DatabaseClient {
+  query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[] }>;
+  exec(sql: string): Promise<void>;
+  transaction<T>(
+    fn: (tx: {
+      query<R = any>(sql: string, params?: any[]): Promise<{ rows: R[] }>;
+      exec(sql: string): Promise<void>;
+    }) => Promise<T>
+  ): Promise<T>;
+}
+
+class PostgresDbClient implements DatabaseClient {
+  constructor(private pool: Pool) {}
+
+  async query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[] }> {
+    const res = await this.pool.query(sql, params);
+    return { rows: res.rows };
+  }
+
+  async exec(sql: string): Promise<void> {
+    await this.pool.query(sql);
+  }
+
+  async transaction<T>(
+    fn: (tx: {
+      query<R = any>(sql: string, params?: any[]): Promise<{ rows: R[] }>;
+      exec(sql: string): Promise<void>;
+    }) => Promise<T>
+  ): Promise<T> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      const tx = {
+        query: async <R = any>(sql: string, params?: any[]) => {
+          const res = await client.query(sql, params);
+          return { rows: res.rows };
+        },
+        exec: async (sql: string) => {
+          await client.query(sql);
+        },
+      };
+      const result = await fn(tx);
+      await client.query('COMMIT');
+      return result;
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+}
+
+class PGliteDbClient implements DatabaseClient {
+  constructor(private db: PGlite) {}
+
+  async query<T = any>(sql: string, params?: any[]): Promise<{ rows: T[] }> {
+    const res = await this.db.query<T>(sql, params);
+    return { rows: res.rows };
+  }
+
+  async exec(sql: string): Promise<void> {
+    await this.db.exec(sql);
+  }
+
+  async transaction<T>(
+    fn: (tx: {
+      query<R = any>(sql: string, params?: any[]): Promise<{ rows: R[] }>;
+      exec(sql: string): Promise<void>;
+    }) => Promise<T>
+  ): Promise<T> {
+    return this.db.transaction(fn as any);
+  }
+}
+
+// Check if running in a serverless cloud environment (Vercel, AWS Lambda) where process.cwd() is read-only
+const isServerless = Boolean(
+  process.env.VERCEL ||
+  process.env.AWS_LAMBDA_FUNCTION_NAME ||
+  process.env.VERCEL_ENV
+);
+
+// In Vercel serverless environment, /var/task is read-only.
+// /tmp is the writable storage directory allocated for the serverless function.
+const DB_DIR = isServerless
+  ? path.join('/tmp', 'smart_leadgeeks_data')
+  : path.join(process.cwd(), 'data');
 const PG_DATA_DIR = path.join(DB_DIR, 'pgdata');
 
 // Preserve singleton across Next.js dev server hot-reloads
 const globalForDb = globalThis as unknown as {
-  pglite: PGlite | undefined;
-  pglitePromise: Promise<PGlite> | undefined;
+  dbClient: DatabaseClient | undefined;
+  dbPromise: Promise<DatabaseClient> | undefined;
 };
 
-async function initSchema(db: PGlite): Promise<void> {
+async function initSchema(db: DatabaseClient): Promise<void> {
   await db.exec(`
     CREATE TABLE IF NOT EXISTS goals (
       id SERIAL PRIMARY KEY,
@@ -87,25 +174,65 @@ async function initSchema(db: PGlite): Promise<void> {
   `);
 }
 
-export async function getDb(): Promise<PGlite> {
-  if (globalForDb.pglite) {
-    return globalForDb.pglite;
+export async function getDb(): Promise<DatabaseClient> {
+  if (globalForDb.dbClient) {
+    return globalForDb.dbClient;
   }
 
-  if (!globalForDb.pglitePromise) {
-    globalForDb.pglitePromise = (async () => {
-      if (!fs.existsSync(DB_DIR)) {
-        fs.mkdirSync(DB_DIR, { recursive: true });
+  if (!globalForDb.dbPromise) {
+    globalForDb.dbPromise = (async () => {
+      const rawDbUrl = process.env.DATABASE_URL || process.env.POSTGRES_URL;
+
+      let client: DatabaseClient;
+
+      if (rawDbUrl?.trim()) {
+        // Use Remote PostgreSQL (Aiven / Neon / Supabase / Vercel Postgres)
+        const cleanDbUrl = rawDbUrl.trim().replace(/[?&]sslmode=[^&]+/, '');
+        const pool = new Pool({
+          connectionString: cleanDbUrl,
+          ssl: {
+            rejectUnauthorized: false,
+          },
+          max: 10,
+          idleTimeoutMillis: 30000,
+        });
+        client = new PostgresDbClient(pool);
+      } else {
+        // Fallback to local / serverless PGlite
+        if (!fs.existsSync(DB_DIR)) {
+          fs.mkdirSync(DB_DIR, { recursive: true });
+        }
+        const pglite = new PGlite(PG_DATA_DIR);
+        await pglite.waitReady;
+        client = new PGliteDbClient(pglite);
       }
-      const db = new PGlite(PG_DATA_DIR);
-      await db.waitReady;
-      await initSchema(db);
-      globalForDb.pglite = db;
-      return db;
+
+      await initSchema(client);
+      globalForDb.dbClient = client;
+      return client;
     })();
   }
 
-  return globalForDb.pglitePromise;
+  return globalForDb.dbPromise;
+}
+
+let isSeeding = false;
+export async function ensureSeeded(): Promise<void> {
+  if (isSeeding) return;
+  const db = await getDb();
+  try {
+    const countRes = await db.query('SELECT COUNT(*) as count FROM goals');
+    const count = Number(countRes.rows[0]?.count || 0);
+    if (count === 0) {
+      isSeeding = true;
+      const { seedDatabaseFromExcel } = await import('./excel-parser');
+      await seedDatabaseFromExcel();
+    }
+  } catch (err) {
+    console.warn('Auto-seed check warning:', err);
+  } finally {
+    isSeeding = false;
+  }
 }
 
 export async function getAllGoals(filters?: {
@@ -114,6 +241,7 @@ export async function getAllGoals(filters?: {
   goalType?: string;
   search?: string;
 }): Promise<Goal[]> {
+  await ensureSeeded();
   const db = await getDb();
   let query = `SELECT * FROM goals WHERE 1=1`;
   const params: any[] = [];

@@ -4,7 +4,19 @@ import fs from 'fs';
 import { getDb } from './db';
 import { DepartmentFunction, GoalStatus, AccomplishmentStatus, GoalType } from './types';
 
-export const DEFAULT_EXCEL_PATH = '/home/noah/Documents/sheets/[IT SMART Goals] - LeadGeeks Inc. 2026 Goals, Objectives and Plans.xlsx';
+export const PRIMARY_EXCEL_PATH = '/home/noah/Documents/sheets/[IT SMART Goals] - LeadGeeks Inc. 2026 Goals, Objectives and Plans.xlsx';
+export const BUNDLED_EXCEL_PATH = path.join(process.cwd(), 'data', 'seed-template.xlsx');
+export const DEFAULT_EXCEL_PATH = PRIMARY_EXCEL_PATH;
+
+export function resolveDefaultExcelPath(): string {
+  if (fs.existsSync(PRIMARY_EXCEL_PATH)) {
+    return PRIMARY_EXCEL_PATH;
+  }
+  if (fs.existsSync(BUNDLED_EXCEL_PATH)) {
+    return BUNDLED_EXCEL_PATH;
+  }
+  return PRIMARY_EXCEL_PATH;
+}
 
 function excelDateToString(val: any): string {
   if (!val) return '';
@@ -91,22 +103,32 @@ export async function seedDatabaseFromExcel(source?: string | Buffer) {
   if (Buffer.isBuffer(source)) {
     fileBuffer = source;
   } else {
-    const filePath = typeof source === 'string' && source ? source : DEFAULT_EXCEL_PATH;
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`Excel source file not found at: ${filePath}`);
+    const preferredPath = typeof source === 'string' && source ? source : resolveDefaultExcelPath();
+    if (fs.existsSync(preferredPath)) {
+      fileBuffer = fs.readFileSync(preferredPath);
+    } else if (fs.existsSync(BUNDLED_EXCEL_PATH)) {
+      fileBuffer = fs.readFileSync(BUNDLED_EXCEL_PATH);
+    } else {
+      throw new Error(`Excel source file not found. Checked: ${preferredPath} and ${BUNDLED_EXCEL_PATH}`);
     }
-    fileBuffer = fs.readFileSync(filePath);
   }
 
   const workbook = XLSX.read(fileBuffer, { type: 'buffer', cellDates: false });
   const db = await getDb();
 
-  const iteSheet = workbook.Sheets['ITE'];
+  const sheetNames = workbook.SheetNames || [];
+  const iteSheet =
+    workbook.Sheets['ITE'] ||
+    workbook.Sheets['IT'] ||
+    workbook.Sheets['Goals'] ||
+    workbook.Sheets['SMART Goals'] ||
+    (sheetNames.length > 0 ? workbook.Sheets[sheetNames[0]] : undefined);
+
   if (!iteSheet) {
-    throw new Error(`Sheet 'ITE' not found in workbook.`);
+    throw new Error(`Goals sheet (e.g. 'ITE') not found in workbook. Available sheets: [${sheetNames.join(', ')}]`);
   }
 
-  const bigSixSheet = workbook.Sheets['The BIG Six'];
+  const bigSixSheet = workbook.Sheets['The BIG Six'] || workbook.Sheets['Big Six'] || workbook.Sheets['BIG SIX'];
 
   await db.transaction(async (tx) => {
     // Clear existing tables and reset identity sequences in Postgres
