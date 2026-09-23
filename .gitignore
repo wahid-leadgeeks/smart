@@ -37,3 +37,5 @@ next-env.d.ts
 
 # PGlite data directory
 /data/pgdata/
+.vercel
+.env*
