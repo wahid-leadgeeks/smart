@@ -5,6 +5,7 @@ import { Button } from '../ui/Button';
 import {
   CalendarRange,
   LayoutGrid,
+  LayoutDashboard,
   CalendarCheck,
   Target,
   Download,
@@ -130,6 +131,19 @@ export function TopHeader({
 
           {/* Primary View Navigation Tabs (Center on desktop) */}
           <nav className="inline-flex p-1 rounded-xl bg-stone-200/70 border border-stone-200/80 gap-1 overflow-x-auto scrollbar-none shrink-0 self-start lg:self-center">
+            <button
+              onClick={() => onViewChange('overview')}
+              className={clsx(
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all whitespace-nowrap',
+                currentView === 'overview'
+                  ? 'bg-white text-stone-900 shadow-xs'
+                  : 'text-stone-600 hover:text-stone-900 hover:bg-stone-200/50'
+              )}
+            >
+              <LayoutDashboard className="w-3.5 h-3.5 text-stone-500" />
+              <span>Overview</span>
+            </button>
+
             <button
               onClick={() => onViewChange('board')}
               className={clsx(

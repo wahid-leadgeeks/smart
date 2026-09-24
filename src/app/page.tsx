@@ -6,6 +6,7 @@ import { Goal, MonthlyLog, ViewMode, DepartmentFunction, GoalStatus, GoalType } 
 import type { SessionResponse } from '@/lib/auth/types';
 import { TopHeader } from '@/components/navigation/TopHeader';
 import { ExecutivePulse } from '@/components/navigation/ExecutivePulse';
+import { OverviewView } from '@/components/views/OverviewView';
 import { RoadmapView } from '@/components/views/RoadmapView';
 import { BoardView } from '@/components/views/BoardView';
 import { CadenceView } from '@/components/views/CadenceView';
@@ -19,8 +20,8 @@ export default function SmartGoalsDashboard() {
   const router = useRouter();
   const [goals, setGoals] = useState<Goal[]>([]);
   const [loading, setLoading] = useState(true);
-  // Default to board (Goals Overview) for immediate, non-technical readability
-  const [currentView, setCurrentView] = useState<ViewMode>('board');
+  // Default to overview for executive strategic cockpit
+  const [currentView, setCurrentView] = useState<ViewMode>('overview');
   const [session, setSession] = useState<SessionResponse | null>(null);
 
   // Filters
@@ -78,7 +79,7 @@ export default function SmartGoalsDashboard() {
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const v = params.get('view');
-      if (v === 'strategic' || v === 'board' || v === 'roadmap' || v === 'cadence') {
+      if (v === 'overview' || v === 'strategic' || v === 'board' || v === 'roadmap' || v === 'cadence') {
         setCurrentView(v as ViewMode);
       }
 
@@ -326,6 +327,18 @@ export default function SmartGoalsDashboard() {
           </div>
         ) : (
           <>
+            {currentView === 'overview' && (
+              <OverviewView
+                goals={filteredGoals}
+                onSelectGoal={handleSelectGoal}
+                onNavigateView={setCurrentView}
+                onFilterDepartment={(fn) => {
+                  setSelectedFunction(fn);
+                  setCurrentView('board');
+                }}
+              />
+            )}
+
             {currentView === 'board' && (
               <BoardView goals={filteredGoals} onSelectGoal={handleSelectGoal} />
             )}

@@ -96,4 +96,4 @@ export interface FilterState {
   goalType: GoalType | 'All';
 }
 
-export type ViewMode = 'roadmap' | 'board' | 'cadence' | 'strategic';
+export type ViewMode = 'overview' | 'board' | 'roadmap' | 'cadence' | 'strategic';
