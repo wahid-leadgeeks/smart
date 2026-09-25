@@ -300,7 +300,7 @@ export default function SmartGoalsDashboard() {
       )}
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-3.5 sm:py-4">
         {loading ? (
           <div className="h-96 flex flex-col items-center justify-center gap-3">
             <Loader2 className="w-8 h-8 animate-spin text-stone-700" />
