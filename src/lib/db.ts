@@ -167,10 +167,38 @@ async function initSchema(db: DatabaseClient): Promise<void> {
       company_priority TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      id SERIAL PRIMARY KEY,
+      endpoint TEXT UNIQUE NOT NULL,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      user_email TEXT,
+      user_name TEXT,
+      user_avatar TEXT,
+      device_info TEXT,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS app_notifications (
+      id SERIAL PRIMARY KEY,
+      sender_email TEXT,
+      sender_name TEXT,
+      recipient_email TEXT DEFAULT 'ALL',
+      category TEXT DEFAULT 'Update',
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      target_url TEXT DEFAULT '/',
+      read_status BOOLEAN DEFAULT FALSE,
+      created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_monthly_logs_goal ON monthly_logs (goal_id);
     CREATE INDEX IF NOT EXISTS idx_monthly_logs_month ON monthly_logs (month_number);
     CREATE INDEX IF NOT EXISTS idx_goals_function ON goals (function);
     CREATE INDEX IF NOT EXISTS idx_goals_status ON goals (status);
+    CREATE INDEX IF NOT EXISTS idx_push_subs_email ON push_subscriptions (user_email);
+    CREATE INDEX IF NOT EXISTS idx_app_notifs_created ON app_notifications (created_at DESC);
   `);
 }
 
@@ -433,3 +461,131 @@ export async function getBigSix(): Promise<BigSixObjective[]> {
   const res = await db.query<BigSixObjective>(`SELECT * FROM big_six ORDER BY objective_number ASC`);
   return res.rows;
 }
+
+export interface PushSubscriptionRecord {
+  id: number;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_email?: string;
+  user_name?: string;
+  user_avatar?: string;
+  device_info?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AppNotification {
+  id: number;
+  sender_email?: string;
+  sender_name?: string;
+  recipient_email: string;
+  category?: string;
+  title: string;
+  message: string;
+  target_url?: string;
+  read_status?: boolean;
+  created_at?: string;
+}
+
+export async function upsertPushSubscription(data: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  user_email?: string;
+  user_name?: string;
+  user_avatar?: string;
+  device_info?: string;
+}): Promise<PushSubscriptionRecord> {
+  const db = await getDb();
+  const sql = `
+    INSERT INTO push_subscriptions (endpoint, p256dh, auth, user_email, user_name, user_avatar, device_info, updated_at)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+    ON CONFLICT (endpoint) DO UPDATE SET
+      p256dh = EXCLUDED.p256dh,
+      auth = EXCLUDED.auth,
+      user_email = COALESCE(EXCLUDED.user_email, push_subscriptions.user_email),
+      user_name = COALESCE(EXCLUDED.user_name, push_subscriptions.user_name),
+      user_avatar = COALESCE(EXCLUDED.user_avatar, push_subscriptions.user_avatar),
+      device_info = COALESCE(EXCLUDED.device_info, push_subscriptions.device_info),
+      updated_at = CURRENT_TIMESTAMP
+    RETURNING *;
+  `;
+  const res = await db.query<PushSubscriptionRecord>(sql, [
+    data.endpoint,
+    data.p256dh,
+    data.auth,
+    data.user_email || null,
+    data.user_name || null,
+    data.user_avatar || null,
+    data.device_info || null,
+  ]);
+  return res.rows[0];
+}
+
+export async function deletePushSubscriptionByEndpoint(endpoint: string): Promise<boolean> {
+  const db = await getDb();
+  await db.query(`DELETE FROM push_subscriptions WHERE endpoint = $1`, [endpoint]);
+  return true;
+}
+
+export async function getAllPushSubscriptions(recipientEmail?: string): Promise<PushSubscriptionRecord[]> {
+  const db = await getDb();
+  if (recipientEmail && recipientEmail !== 'ALL') {
+    const res = await db.query<PushSubscriptionRecord>(
+      `SELECT * FROM push_subscriptions WHERE user_email ILIKE $1 OR user_email = 'ALL' ORDER BY id DESC`,
+      [recipientEmail]
+    );
+    return res.rows;
+  }
+  const res = await db.query<PushSubscriptionRecord>(
+    `SELECT * FROM push_subscriptions ORDER BY id DESC`
+  );
+  return res.rows;
+}
+
+export async function createAppNotification(data: {
+  sender_email?: string;
+  sender_name?: string;
+  recipient_email?: string;
+  category?: string;
+  title: string;
+  message: string;
+  target_url?: string;
+}): Promise<AppNotification> {
+  const db = await getDb();
+  const sql = `
+    INSERT INTO app_notifications (sender_email, sender_name, recipient_email, category, title, message, target_url)
+    VALUES ($1, $2, $3, $4, $5, $6, $7)
+    RETURNING *;
+  `;
+  const res = await db.query<AppNotification>(sql, [
+    data.sender_email || null,
+    data.sender_name || 'Team Lead',
+    data.recipient_email || 'ALL',
+    data.category || 'Update',
+    data.title,
+    data.message,
+    data.target_url || '/',
+  ]);
+  return res.rows[0];
+}
+
+export async function getAppNotifications(limit = 30): Promise<AppNotification[]> {
+  const db = await getDb();
+  const res = await db.query<AppNotification>(
+    `SELECT * FROM app_notifications ORDER BY created_at DESC LIMIT $1`,
+    [limit]
+  );
+  return res.rows.map((n) => ({
+    ...n,
+    created_at: n.created_at ? new Date(n.created_at).toISOString() : undefined,
+  }));
+}
+
+export async function markNotificationAsRead(id: number): Promise<boolean> {
+  const db = await getDb();
+  await db.query(`UPDATE app_notifications SET read_status = TRUE WHERE id = $1`, [id]);
+  return true;
+}
+

@@ -17,6 +17,7 @@ import {
   CheckCircle2,
   LogOut,
   FileSpreadsheet,
+  Bell,
 } from 'lucide-react';
 import clsx from 'clsx';
 import { DEFAULT_SPREADSHEET_ID, DEFAULT_SPREADSHEET_URL } from '@/lib/sheets/client';
@@ -29,6 +30,8 @@ interface TopHeaderProps {
   onSync: () => void;
   onExport: () => void;
   onOpenGoogleModal?: () => void;
+  onOpenNotificationsModal?: () => void;
+  unreadNotificationsCount?: number;
   isSyncing: boolean;
   isExporting: boolean;
   totalGoals: number;
@@ -56,6 +59,8 @@ export function TopHeader({
   onSync,
   onExport,
   onOpenGoogleModal,
+  onOpenNotificationsModal,
+  unreadNotificationsCount,
   isSyncing,
   isExporting,
   totalGoals,
@@ -108,6 +113,21 @@ export function TopHeader({
 
             {/* Mobile Actions (Visible on small screens) */}
             <div className="flex lg:hidden items-center gap-1.5">
+              {onOpenNotificationsModal && (
+                <button
+                  type="button"
+                  onClick={onOpenNotificationsModal}
+                  title="Team Alerts & Push Notifications"
+                  className="relative p-1.5 rounded-lg border border-stone-200 hover:bg-stone-100 text-stone-700 transition-colors"
+                >
+                  <Bell className="w-3.5 h-3.5 text-stone-700" />
+                  {unreadNotificationsCount && unreadNotificationsCount > 0 ? (
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-500 text-stone-950 font-mono font-bold text-[8px] flex items-center justify-center">
+                      {unreadNotificationsCount}
+                    </span>
+                  ) : null}
+                </button>
+              )}
               <a
                 href={spreadsheetUrl}
                 target="_blank"
@@ -249,6 +269,23 @@ export function TopHeader({
                 </button>
               )}
             </div>
+
+            {/* Notification Bell Button */}
+            {onOpenNotificationsModal && (
+              <button
+                type="button"
+                onClick={onOpenNotificationsModal}
+                title="Team Communications & Push Notifications"
+                className="relative p-1.5 rounded-lg border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 transition shadow-subtle flex items-center justify-center shrink-0"
+              >
+                <Bell className="w-3.5 h-3.5 text-stone-700" />
+                {unreadNotificationsCount && unreadNotificationsCount > 0 ? (
+                  <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-amber-500 text-stone-950 font-mono font-bold text-[9px] flex items-center justify-center shadow-xs">
+                    {unreadNotificationsCount > 9 ? '9+' : unreadNotificationsCount}
+                  </span>
+                ) : null}
+              </button>
+            )}
 
             {/* Google Sheets Status & Direct Link */}
             <div className="hidden sm:flex items-center gap-1.5" ref={profileRef}>

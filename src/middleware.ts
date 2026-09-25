@@ -13,12 +13,15 @@ const PUBLIC_PREFIXES = [
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
-  // 1. Allow static assets, images, and Next.js internal files
+  // 1. Allow static assets, images, PWA manifests, and Next.js internal files
   if (
     pathname.startsWith('/_next') ||
     pathname.startsWith('/static') ||
     pathname === '/favicon.ico' ||
-    /\.(ico|png|jpg|jpeg|svg|webp|css|js|map)$/i.test(pathname)
+    pathname === '/manifest.webmanifest' ||
+    pathname === '/manifest.json' ||
+    pathname === '/sw.js' ||
+    /\.(ico|png|jpg|jpeg|svg|webp|css|js|map|json|webmanifest)$/i.test(pathname)
   ) {
     return NextResponse.next();
   }

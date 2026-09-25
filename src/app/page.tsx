@@ -14,6 +14,7 @@ import { StrategicMapView } from '@/components/views/StrategicMapView';
 import { Toast } from '@/components/ui/Toast';
 import { GoogleSpreadsheetModal } from '@/components/modals/GoogleSpreadsheetModal';
 import { ConfirmDialog } from '@/components/modals/ConfirmDialog';
+import { NotificationCenterModal } from '@/components/notifications/NotificationCenterModal';
 import { Loader2 } from 'lucide-react';
 
 export default function SmartGoalsDashboard() {
@@ -34,6 +35,8 @@ export default function SmartGoalsDashboard() {
   const [isSyncing, setIsSyncing] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isGoogleModalOpen, setIsGoogleModalOpen] = useState(false);
+  const [isNotificationsModalOpen, setIsNotificationsModalOpen] = useState(false);
+  const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
   const [confirmDialog, setConfirmDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -72,9 +75,23 @@ export default function SmartGoalsDashboard() {
     }
   };
 
+  const fetchNotificationsCount = async () => {
+    try {
+      const res = await fetch('/api/notifications');
+      const data = await res.json();
+      if (data.success && data.data?.notifications) {
+        const unread = data.data.notifications.filter((n: any) => !n.read_status).length;
+        setUnreadNotificationsCount(unread);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     fetchGoals();
     fetchSession();
+    fetchNotificationsCount();
 
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
@@ -279,6 +296,8 @@ export default function SmartGoalsDashboard() {
         onSync={handleSyncExcel}
         onExport={handleExportExcel}
         onOpenGoogleModal={() => setIsGoogleModalOpen(true)}
+        onOpenNotificationsModal={() => setIsNotificationsModalOpen(true)}
+        unreadNotificationsCount={unreadNotificationsCount}
         isSyncing={isSyncing}
         isExporting={isExporting}
         totalGoals={goals.length}
@@ -370,6 +389,17 @@ export default function SmartGoalsDashboard() {
           fetchGoals();
           fetchSession();
         }}
+      />
+
+      {/* Team Communications & Push Notifications Modal */}
+      <NotificationCenterModal
+        isOpen={isNotificationsModalOpen}
+        onClose={() => {
+          setIsNotificationsModalOpen(false);
+          fetchNotificationsCount();
+        }}
+        goals={goals}
+        onSelectGoal={handleSelectGoal}
       />
 
       {/* Confirmation Dialog */}

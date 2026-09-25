@@ -115,3 +115,21 @@ export async function getSessionAccessToken(request: Request): Promise<string | 
   const { session } = await resolveActiveSession(sessionCookie);
   return session?.tokens?.accessToken;
 }
+
+/**
+ * Extracts the authenticated GoogleUser from an incoming Request's cookies.
+ */
+export async function getSessionUser(request: Request) {
+  const cookieHeader = request.headers.get('cookie') || '';
+  const cookies = new Map(
+    cookieHeader.split(';').map((pair) => {
+      const [k, ...v] = pair.trim().split('=');
+      return [k, decodeURIComponent(v.join('='))] as const;
+    })
+  );
+  const sessionCookie = cookies.get(SMART_SESSION_COOKIE);
+  if (!sessionCookie) return null;
+  const { session } = await resolveActiveSession(sessionCookie);
+  return session?.user || null;
+}
+
