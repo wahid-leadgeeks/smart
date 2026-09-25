@@ -374,12 +374,12 @@ export function TopHeader({
                 </div>
               ) : (
                 <a
-                  href="/api/auth/login"
+                  href="/login"
                   className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-stone-200 bg-white hover:bg-stone-50 text-stone-700 hover:text-stone-900 text-xs font-medium transition shadow-subtle"
-                  title="Sign in with Google to enable live cloud sync from the Google Spreadsheet"
+                  title="Sign in with your LeadGeeks Google Workspace account"
                 >
                   <GoogleIcon className="w-3.5 h-3.5" />
-                  <span className="hidden md:inline">Connect</span>
+                  <span>Sign In</span>
                 </a>
               )}
             </div>

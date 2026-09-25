@@ -190,10 +190,9 @@ export default function SmartGoalsDashboard() {
   const handleLogout = async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      setSession({ authenticated: false, user: null });
-      setToast({ message: 'Signed out from Google Sheets.', type: 'info' });
+      window.location.href = '/login?status=logged_out';
     } catch {
-      setToast({ message: 'Failed to sign out', type: 'error' });
+      window.location.href = '/login?status=logged_out';
     }
   };
 
