@@ -19,6 +19,7 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { DEFAULT_SPREADSHEET_ID, DEFAULT_SPREADSHEET_URL } from '@/lib/sheets/client';
 
 interface TopHeaderProps {
   currentView: ViewMode;
@@ -66,7 +67,13 @@ export function TopHeader({
 
   const spreadsheetUrl =
     session?.spreadsheetUrl ||
-    'https://docs.google.com/spreadsheets/d/1vWFuIU_LxCqyQ7Bn5N2K4gBDcIcnmogYA_ALiucWxbo';
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL ||
+    DEFAULT_SPREADSHEET_URL;
+
+  const spreadsheetId =
+    session?.spreadsheetId ||
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID ||
+    DEFAULT_SPREADSHEET_ID;
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -319,7 +326,7 @@ export function TopHeader({
                           <span>Google Sheets Sync Active</span>
                         </div>
                         <p className="text-stone-400 truncate font-mono text-[10px]">
-                          ID: {session.spreadsheetId || '1vWFuIU_LxCqy...'}
+                          ID: {spreadsheetId}
                         </p>
                       </div>
 

@@ -1,6 +1,7 @@
 import { decryptSession, encryptSession } from './crypto';
 import { refreshGoogleAccessToken } from './google';
 import type { AuthSession, SessionResponse } from './types';
+import { DEFAULT_SPREADSHEET_ID, DEFAULT_SPREADSHEET_URL } from '../sheets/client';
 
 export const SMART_SESSION_COOKIE = 'smart_session';
 export const SMART_STATE_COOKIE = 'smart_oauth_state';
@@ -72,8 +73,14 @@ export async function resolveActiveSession(
  * Formats a sanitized session response for client-side consumption.
  */
 export function toSessionResponse(session: AuthSession | null): SessionResponse {
-  const spreadsheetId = process.env.GOOGLE_SHEETS_ID;
-  const spreadsheetUrl = process.env.GOOGLE_SHEETS_URL || (spreadsheetId ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}` : undefined);
+  const spreadsheetId =
+    process.env.GOOGLE_SHEETS_ID ||
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID ||
+    DEFAULT_SPREADSHEET_ID;
+  const spreadsheetUrl =
+    process.env.GOOGLE_SHEETS_URL ||
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL ||
+    DEFAULT_SPREADSHEET_URL;
 
   if (!session) {
     return { authenticated: false, user: null, spreadsheetId, spreadsheetUrl };

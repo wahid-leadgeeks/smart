@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { seedDatabaseFromExcel } from '@/lib/excel-parser';
 import { getSessionAccessToken } from '@/lib/auth/session';
-import { downloadSpreadsheetBufferFromGoogle, extractGoogleFileId } from '@/lib/sheets/client';
+import {
+  downloadSpreadsheetBufferFromGoogle,
+  extractGoogleFileId,
+  DEFAULT_SPREADSHEET_ID,
+} from '@/lib/sheets/client';
 
 export const dynamic = 'force-dynamic';
 
@@ -13,7 +17,13 @@ export async function POST(request: NextRequest) {
       fileId?: string;
     };
     const requestedSource = body.source || 'auto';
-    const targetFileOrSheetId = extractGoogleFileId(body.spreadsheetId || body.fileId || process.env.GOOGLE_SHEETS_ID || '');
+    const targetFileOrSheetId = extractGoogleFileId(
+      body.spreadsheetId ||
+      body.fileId ||
+      process.env.GOOGLE_SHEETS_ID ||
+      process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID ||
+      DEFAULT_SPREADSHEET_ID
+    );
     const accessToken = await getSessionAccessToken(request);
 
     // 1. If Google sync is requested or available with access token

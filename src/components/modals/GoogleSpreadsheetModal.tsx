@@ -3,7 +3,12 @@
 import React, { useState, useEffect } from 'react';
 import type { SessionResponse } from '@/lib/auth/types';
 import type { GoogleDriveFile } from '@/lib/sheets/client';
-import { extractGoogleFileId, buildGoogleSpreadsheetUrl } from '@/lib/sheets/client';
+import {
+  extractGoogleFileId,
+  buildGoogleSpreadsheetUrl,
+  DEFAULT_SPREADSHEET_ID,
+  DEFAULT_SPREADSHEET_URL,
+} from '@/lib/sheets/client';
 import {
   X,
   FileSpreadsheet,
@@ -56,9 +61,14 @@ export function GoogleSpreadsheetModal({
     details?: string;
   } | null>(null);
 
-  const activeSpreadsheetId = session?.spreadsheetId || '1vWFuIU_LxCqyQ7Bn5N2K4gBDcIcnmogYA_ALiucWxbo';
+  const activeSpreadsheetId =
+    session?.spreadsheetId ||
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID ||
+    DEFAULT_SPREADSHEET_ID;
   const activeSpreadsheetUrl =
-    session?.spreadsheetUrl || `https://docs.google.com/spreadsheets/d/${activeSpreadsheetId}`;
+    session?.spreadsheetUrl ||
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL ||
+    buildGoogleSpreadsheetUrl(activeSpreadsheetId);
 
   // Fetch Google Drive spreadsheets when modal opens and user is logged in
   useEffect(() => {
@@ -457,7 +467,7 @@ export function GoogleSpreadsheetModal({
                   <div className="flex gap-2">
                     <input
                       type="text"
-                      placeholder="https://docs.google.com/spreadsheets/d/1vWFuIU_... or File ID"
+                      placeholder="https://docs.google.com/spreadsheets/d/... or File ID"
                       value={customInput}
                       onChange={(e) => setCustomInput(e.target.value)}
                       className="flex-1 px-3 py-2 text-xs bg-white rounded-lg border border-stone-200 text-stone-900 placeholder-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-900"

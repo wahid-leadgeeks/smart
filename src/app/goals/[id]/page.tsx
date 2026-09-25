@@ -44,6 +44,7 @@ import {
   FileText,
 } from 'lucide-react';
 import clsx from 'clsx';
+import { DEFAULT_SPREADSHEET_URL } from '@/lib/sheets/client';
 
 type DetailTab = 'overview' | 'cadence' | 'technical';
 
@@ -61,6 +62,21 @@ export default function GoalDetailPage() {
   const [monthlyLogs, setMonthlyLogs] = useState<MonthlyLog[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState<string>(
+    process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL || DEFAULT_SPREADSHEET_URL
+  );
+
+  // Fetch session to obtain active spreadsheet URL dynamically
+  useEffect(() => {
+    fetch('/api/auth/session')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.spreadsheetUrl) {
+          setSpreadsheetUrl(data.spreadsheetUrl);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Fetch goal data on load
   useEffect(() => {
@@ -257,7 +273,7 @@ export default function GoalDetailPage() {
 
             <div className="text-xs font-mono text-stone-500 self-start md:self-auto">
               <a
-                href="https://docs.google.com/spreadsheets/d/1vWFuIU_LxCqyQ7Bn5N2K4gBDcIcnmogYA_ALiucWxbo"
+                href={spreadsheetUrl}
                 target="_blank"
                 rel="noopener noreferrer"
                 title="View in Google Sheets"

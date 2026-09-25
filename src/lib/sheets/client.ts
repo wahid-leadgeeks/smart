@@ -55,6 +55,27 @@ export function buildGoogleSpreadsheetUrl(spreadsheetId: string): string {
   return `https://docs.google.com/spreadsheets/d/${cleanId}`;
 }
 
+export const DEFAULT_SPREADSHEET_ID =
+  process.env.NEXT_PUBLIC_GOOGLE_SHEETS_ID ||
+  process.env.GOOGLE_SHEETS_ID ||
+  '1vWFuIU_LxCqyQ7Bn5N2K4gBDcIcnmogYA_ALiucWxbo';
+
+export const DEFAULT_SPREADSHEET_URL =
+  process.env.NEXT_PUBLIC_GOOGLE_SHEETS_URL ||
+  process.env.GOOGLE_SHEETS_URL ||
+  `https://docs.google.com/spreadsheets/d/${DEFAULT_SPREADSHEET_ID}`;
+
+export function getActiveSpreadsheetUrl(explicitUrl?: string, explicitId?: string): string {
+  if (explicitUrl) return explicitUrl;
+  if (explicitId) return buildGoogleSpreadsheetUrl(explicitId);
+  return DEFAULT_SPREADSHEET_URL;
+}
+
+export function getActiveSpreadsheetId(explicitId?: string): string {
+  if (explicitId) return extractGoogleFileId(explicitId);
+  return DEFAULT_SPREADSHEET_ID;
+}
+
 /**
  * Lists Google Sheets and Excel files available in the authenticated user's Google Drive.
  */
